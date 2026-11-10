@@ -62,6 +62,7 @@ Actions:
 | `get_config` | `{}` | HomeRead | Read shared STT/TTS/agent/pipeline defaults (no credentials) |
 | `read_api` | `{path}` | HomeRead | Allowlisted read-only HA API GET |
 | `conversation` | `{text, agent_id?, conversation_id?}` | HomeConverse | Call HA conversation/process |
+| `send_to_agent` | `{message, chat_id?}` | HomeConverse | Index 01 agent destination: send `message` to the default conversation agent. `text` is Assist's plain speech, not JSON (Index stores it but doesn't display it); an Assist error returns `ASSIST_ERROR`. `chat_id` is ignored |
 | `tts_prepare` | `{text, engine_id?}` | HomeConverse | Request mono PCM16 WAV from HA, normalize to canonical 8kHz PCM16 WAV for consumer-side encoding; optional `test_tone`, `source_rate` and `diagnostic` options. Returns a session ID and audio metadata |
 | `tts_chunk` | `{session_id, offset}` | HomeConverse | Return a base64 chunk of canonical 8kHz PCM16 WAV (up to 6000 bytes) |
 | `tts_release` | `{session_id}` | HomeConverse | Free temporary speech data |
@@ -104,6 +105,18 @@ const preferences = JSON.parse(result.text);
 ```
 
 The plugin exposes canonical 8 kHz mono PCM16 WAV audio through request-scoped, base64-encoded chunks. It validates the Home Assistant audio format and resamples when needed; the consuming phone app handles filtering and IMA ADPCM encoding, exactly as in Gemini.
+
+## Index 01 ring
+
+The `send_to_agent` action makes the Bridge an Index 01 agent destination. What you say goes straight to Home Assistant Assist, without the Index cloud or local agent.
+
+1. Configure the Bridge (URL, token, **Test connection**). The plugin appears as a destination only while `agent/configured` reports `true`.
+2. Optionally pick a **Conversation agent** under Voice & AI defaults. `send_to_agent` uses it; otherwise Home Assistant's default agent handles the request.
+3. In the Pebble app's Index settings, open a recording gesture (for example **Double click & hold**), expand **Other agents**, and choose **Home Assistant Bridge**.
+
+The Index feed shows your transcript as sent to Home Assistant Bridge; Assist's reply is not displayed there. If Assist can't handle the request (unknown device, not understood), the action fails with `ASSIST_ERROR` and Assist's message, and the feed entry is marked as failed. Each gesture starts a new Assist conversation. Only entities exposed to Assist are reachable.
+
+**Watch replies (optional):** turn on **Show Home Assistant replies on the watch** in the plugin settings to mirror Assist's reply as a watch notification. This requires Pebble app 1.18.0 or later and the **Show notifications** permission, granted in the plugin's permissions. Earlier app versions ignore the option.
 
 ## Watchapp compatibility
 

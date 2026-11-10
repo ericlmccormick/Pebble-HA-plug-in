@@ -12,18 +12,20 @@ assert(pkg.plugin.sources.some(source=>source.items.includes('configured')));
 assert(pkg.plugin.actions.find(a=>a.name==='call_service').callerPermissions.includes('HomeControl'));
 assert(pkg.plugin.actions.find(a=>a.name==='conversation').callerPermissions.includes('HomeConverse'));
 assert(pkg.plugin.actions.find(a=>a.name==='get_config').callerPermissions.includes('HomeRead'));
+assert(pkg.plugin.actions.find(a=>a.name==='send_to_agent').callerPermissions.includes('HomeConverse'));
+assert(pkg.usesPermissions.includes('ShowNotifications'));
 for(const name of ['tts_prepare','tts_chunk','tts_release'])
   assert(pkg.plugin.actions.find(a=>a.name===name).callerPermissions.includes('HomeConverse'));
 
 assert(pkg.plugin.sources.find(s=>s.items.includes('entity')).callerPermissions.includes('HomeRead'));
-let config,source,action,stored={},local={},calls=[];
+let config,source,action,stored={},local={},calls=[],notifications=[],assistReply=null;
 let transientProxyFailures=0;
 const secure={
   getItem:async k=>stored[k]||null,
   setItem:async(k,v)=>{stored[k]=v;},
   removeItem:async k=>{delete stored[k];}
 };
-const Pebble={secureStorage:secure,refreshSources:()=>{},
+const Pebble={secureStorage:secure,refreshSources:()=>{},showNotification:n=>notifications.push(n),
   registerConfigHandler:fn=>config=fn,
   registerSourceHandler:fn=>source=fn,
   registerActionHandler:fn=>action=fn};
@@ -64,7 +66,7 @@ const context={Pebble,console,Date,JSON,Number,String,Object,Array,Promise,isFin
     let data=path==='/api/config'?{location_name:'Test Home'}:
       path==='/api/states'?[{entity_id:'sensor.temp',state:'21.5',attributes:{friendly_name:'Temperature',unit_of_measurement:'°C'}},
         {entity_id:'light.kitchen',state:'on',attributes:{friendly_name:'Kitchen'}}]:
-      path==='/api/conversation/process'?{conversation_id:'abc',response:{speech:{plain:{speech:'Lights are on.'}}}}:
+      path==='/api/conversation/process'?assistReply||{conversation_id:'abc',response:{speech:{plain:{speech:'Lights are on.'}}}}:
       path==='/api/tts_get_url'?{path:'/api/tts_proxy/demo.wav'}:
       {entity_id:'light.kitchen',state:'on',attributes:{}};
     if(path==='/api/tts_proxy/demo.wav'){
@@ -167,6 +169,29 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   assert(r.ok);assert(JSON.parse(r.text).text==='Lights are on.');
   const lastConversation=calls.filter(c=>c.url.endsWith('/api/conversation/process')).pop();
   assert.strictEqual(JSON.parse(lastConversation.opt.body).agent_id,'conversation.google_ai');
+  // Index 01 destination: plain speech text, default agent, no watch reply unless opted in.
+  r=await callAction('send_to_agent',{message:'Turn on the lights',chat_id:'c1'});
+  assert(r.ok);assert.strictEqual(r.text,'Lights are on.');
+  const indexBody=JSON.parse(calls.filter(c=>c.url.endsWith('/api/conversation/process')).pop().opt.body);
+  assert.strictEqual(indexBody.text,'Turn on the lights');
+  assert.strictEqual(indexBody.agent_id,'conversation.google_ai');
+  assert.strictEqual(notifications.length,0,'Watch replies are off by default');
+  r=await callAction('send_to_agent',{message:'  '});
+  assert.strictEqual(r.code,'INVALID_ARGS');
+  s=await callConfig({type:'status'});assert.strictEqual(s.watch_replies,false);
+  s=await callConfig({type:'index_save',watch_replies:true});assert.strictEqual(s.watch_replies,true);
+  s=await callConfig({type:'status'});assert.strictEqual(s.watch_replies,true);
+  r=await callAction('send_to_agent',{message:'Turn on the lights'});
+  assert(r.ok);
+  assert.strictEqual(notifications.length,1);
+  assert.strictEqual(notifications[0].layout.body,'Lights are on.');
+  // Assist answers "no such device" with HTTP 200 and response_type error.
+  assistReply={response:{response_type:'error',speech:{plain:{speech:'No device called toaster'}}}};
+  r=await callAction('send_to_agent',{message:'Turn on the toaster'});
+  assistReply=null;
+  assert.strictEqual(r.code,'ASSIST_ERROR');assert.strictEqual(r.message,'No device called toaster');
+  assert.strictEqual(notifications[1].layout.body,'No device called toaster');
+  s=await callConfig({type:'index_save',watch_replies:'yes'});assert.strictEqual(s.watch_replies,false,'Only boolean true enables replies');
   // A 16kHz HA WAV must be normalized to the precise 8kHz PCM16 WAV
   // that Gemini's phone-side lowPassFilter/encodeADPCM pipeline expects.
   // Bridge-origin tone uses the same persisted WAV session and chunk transport.
@@ -365,5 +390,6 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   assert(!stored.ha_bridge_token);
   assert(!local.ha_voice_defaults_v1,'Forget also clears voice and AI preferences');
   assert(!local.ha_bridge_http_local_opt_in,'Forget clears the HTTP opt-in');
+  assert(!local.ha_index_watch_replies_v1,'Forget clears the watch reply option');
   console.log('Home Assistant plugin API and credential isolation checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

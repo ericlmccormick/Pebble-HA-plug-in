@@ -28,6 +28,11 @@ button.alt{background:#555}select{width:100%;padding:11px;border:1px solid #888;
 <button id="savevoice">Save voice &amp; AI defaults</button>
 <p class="note" id="voice_note">Connect to Home Assistant to load provider choices.</p>
 </fieldset>
+<fieldset><legend>Index 01</legend>
+<p class="note">Route a ring gesture to Home Assistant Bridge in the Index settings to send what you say to the conversation agent above.</p>
+<label class="toggle" for="watchreplies"><input type="checkbox" id="watchreplies"> Show Home Assistant replies on the watch</label>
+<p class="note" id="index_note">Requires the Show notifications permission. Grant it in this plugin's permissions in the Pebble app; replies are dropped until it is granted.</p>
+</fieldset>
 <p class="note">Use a dedicated Home Assistant user with only the permissions necessary. The generic service action can control sensitive devices when approved by the user.</p>
 <script>
 (function(){
@@ -71,6 +76,7 @@ button.alt{background:#555}select{width:100%;padding:11px;border:1px solid #888;
     try {var r=await send({type:'status'});
       $('url').value=r.url||'';
       $('localhttp').checked=r.allow_local_http===true;
+      $('watchreplies').checked=r.watch_replies===true;
       updateLocalMode();
       status(r.configured?'Configured (token stored).':'Not configured.');
       if(r.configured)await discoverVoice();
@@ -86,6 +92,13 @@ button.alt{background:#555}select{width:100%;padding:11px;border:1px solid #888;
     }catch(e){status('Save failed: '+e.message);}
   };
   $('discover').onclick=discoverVoice;
+  $('watchreplies').onchange=async function(){
+    var want=$('watchreplies').checked;
+    try{var r=await send({type:'index_save',watch_replies:want});
+      $('watchreplies').checked=r.watch_replies===true;
+      $('index_note').textContent=r.watch_replies?'Replies will be shown on the watch.':'Replies will not be shown on the watch.';
+    }catch(e){$('watchreplies').checked=!want;$('index_note').textContent='Could not save: '+e.message;}
+  };
   $('savevoice').onclick=async function(){
     $('voice_note').textContent='Saving preferences…';
     try {

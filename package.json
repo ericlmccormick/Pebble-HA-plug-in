@@ -11,7 +11,8 @@
     "configPage": "src/config.html",
     "usesPermissions": [
       "Internet",
-      "LocalNetwork"
+      "LocalNetwork",
+      "ShowNotifications"
     ],
     "plugin": {
       "description": "Reusable Home Assistant bridge: entities, Assist, secure TTS, and controls. Audio SDK integration: https://github.com/ericlmccormick/Pebble-HA-plug-in/tree/main/sdk",
@@ -177,6 +178,27 @@
             },
             "required": [
               "text"
+            ]
+          },
+          "callerPermissions": [
+            "HomeConverse"
+          ]
+        },
+        {
+          "name": "send_to_agent",
+          "description": "Send a spoken request from Index 01 to the configured Home Assistant Assist agent.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "chat_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
             ]
           },
           "callerPermissions": [
