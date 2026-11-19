@@ -600,6 +600,33 @@ var SAFE_READ=/^\/api\/(?:config|services|states(?:\/[a-z][a-z0-9_]*\.[a-z0-9_]+
 Pebble.registerActionHandler(async function(request,respond) {
   var args=request.args||{},r,refresh=[];
   switch(request.action){
+    case 'list_controls': {
+      // Compact, bounded response for Pebble AppMessage. Never include credentials or arbitrary attributes.
+      r=await api('/api/states');
+      if(r.ok&&Array.isArray(r.data)){
+        var enabled={light:1,switch:1,input_boolean:1,fan:1,cover:1,scene:1,script:1,automation:1};
+        r.data=r.data.filter(function(e){
+          return e&&typeof e.entity_id==='string'&&enabled[e.entity_id.split('.')[0]];
+        }).slice(0,48).map(function(e){
+          var domain=e.entity_id.split('.')[0],a=e.attributes||{};
+          return {id:e.entity_id,name:String(a.friendly_name||e.entity_id).slice(0,48),
+            state:String(e.state||'unknown').slice(0,24),domain:domain,
+            brightness:typeof a.brightness==='number'?Math.round(a.brightness*100/255):-1};
+        });
+      }
+      break;
+    }
+    case 'control_entity': {
+      var id=String(args.entity_id||''),domain=id.split('.')[0];
+      if(!safeId(id)){respond.error('INVALID_ARGS','Invalid entity');return;}
+      // Deliberately exclude locks, doors, alarm panels and other sensitive devices.
+      var toggle={light:1,switch:1,input_boolean:1,fan:1};
+      var press={scene:1,script:1,automation:1};
+      var service=toggle[domain]?'toggle':press[domain]?(domain==='automation'?'trigger':'turn_on'):null;
+      if(!service){respond.error('INVALID_ARGS','Unsupported quick control');return;}
+      r=await api('/api/services/'+domain+'/'+service,'POST',{entity_id:id});
+      refresh=['agent/entity'];break;
+    }
     case 'get_state':
       if(!safeId(args.entity_id)){respond.error('INVALID_ARGS','Invalid entity_id');return;}
       r=await api('/api/states/'+encodeURIComponent(args.entity_id));break;
