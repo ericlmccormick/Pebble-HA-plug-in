@@ -616,10 +616,10 @@ Pebble.registerActionHandler(async function(request,respond) {
         if(candidates.length){
           var ids=candidates.map(function(e){return e.entity_id;});
           var template='{% for entity in '+JSON.stringify(ids)+
-            ' %}{{ area_name(entity) or "" }}\\n{% endfor %}';
+            ' %}{{ area_name(entity) or "" }}\n{% endfor %}';
           var rendered=await api('/api/template','POST',{template:template});
           if(rendered.ok&&typeof rendered.data==='string'){
-            var lines=rendered.data.replace(/\\r/g,'').split('\\n');
+            var lines=rendered.data.replace(/\r/g,'').split('\n');
             if(lines.length>=ids.length){
               ids.forEach(function(id,i){
                 roomById[id]=String(lines[i]||'').trim();
