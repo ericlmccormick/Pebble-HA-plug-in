@@ -605,29 +605,59 @@ Pebble.registerActionHandler(async function(request,respond) {
       r=await api('/api/states');
       if(r.ok&&Array.isArray(r.data)){
         var enabled={light:1,switch:1,input_boolean:1,fan:1,scene:1,script:1,automation:1};
-        // HA's /api/states does not contain area membership. Join registries via
-        // read-only WebSocket discovery, with a graceful fallback for unavailable sockets.
-        var registries=await Promise.all([
-          wsList('config/entity_registry/list'),
-          wsList('config/device_registry/list'),
-          wsList('config/area_registry/list')
-        ]);
-        var entityAreas={},deviceAreas={},areaNames={};
-        if(registries[2].ok&&Array.isArray(registries[2].data))
-          registries[2].data.forEach(function(a){if(a.area_id)areaNames[a.area_id]=String(a.name||a.area_id);});
-        if(registries[1].ok&&Array.isArray(registries[1].data))
-          registries[1].data.forEach(function(d){if(d.id)deviceAreas[d.id]=d.area_id||'';});
-        if(registries[0].ok&&Array.isArray(registries[0].data))
-          registries[0].data.forEach(function(e){
-            if(e.entity_id)entityAreas[e.entity_id]=e.area_id||deviceAreas[e.device_id]||'';
-          });
-        r.data=r.data.filter(function(e){
+        // Home Assistant REST states contain no area/room. Ask Home Assistant
+        // to resolve each entity's effective area with its own area_name()
+        // helper (entity assignment takes precedence over device assignment).
+        // This avoids depending on WebSockets, which some plugin runtimes lack.
+        var candidates=r.data.filter(function(e){
           return e&&typeof e.entity_id==='string'&&enabled[e.entity_id.split('.')[0]];
-        }).slice(0,48).map(function(e){
+        }).slice(0,48);
+        var roomById={},templateOk=false;
+        if(candidates.length){
+          var ids=candidates.map(function(e){return e.entity_id;});
+          var template='{% for entity in '+JSON.stringify(ids)+
+            ' %}{{ area_name(entity) or "" }}\\n{% endfor %}';
+          var rendered=await api('/api/template','POST',{template:template});
+          if(rendered.ok&&typeof rendered.data==='string'){
+            var lines=rendered.data.replace(/\\r/g,'').split('\\n');
+            if(lines.length>=ids.length){
+              ids.forEach(function(id,i){
+                roomById[id]=String(lines[i]||'').trim();
+              });
+              templateOk=true;
+            }
+          }
+        }
+        // Best-effort fallback for older Home Assistant versions. Failure
+        // here never blocks device discovery or control actions.
+        if(!templateOk){
+          var registries=await Promise.all([
+            wsList('config/entity_registry/list'),
+            wsList('config/device_registry/list'),
+            wsList('config/area_registry/list')
+          ]);
+          var entityAreas={},deviceAreas={},areaNames={};
+          if(registries[2].ok&&Array.isArray(registries[2].data))
+            registries[2].data.forEach(function(a){
+              if(a.area_id)areaNames[a.area_id]=String(a.name||a.area_id);
+            });
+          if(registries[1].ok&&Array.isArray(registries[1].data))
+            registries[1].data.forEach(function(d){
+              if(d.id)deviceAreas[d.id]=d.area_id||'';
+            });
+          if(registries[0].ok&&Array.isArray(registries[0].data))
+            registries[0].data.forEach(function(e){
+              if(e.entity_id)entityAreas[e.entity_id]=e.area_id||deviceAreas[e.device_id]||'';
+            });
+          ids=candidates.map(function(e){return e.entity_id;});
+          ids.forEach(function(id){
+            roomById[id]=areaNames[entityAreas[id]]||'';
+          });
+        }
+        r.data=candidates.map(function(e){
           var domain=e.entity_id.split('.')[0],a=e.attributes||{};
-          var area=entityAreas[e.entity_id]||'';
           return {id:e.entity_id,name:String(a.friendly_name||e.entity_id).slice(0,48),
-            room:String(areaNames[area]||'Unassigned').slice(0,36),
+            room:String(roomById[e.entity_id]||'Unassigned').slice(0,36),
             state:String(e.state||'unknown').slice(0,24),domain:domain,
             brightness:typeof a.brightness==='number'?Math.round(a.brightness*100/255):-1};
         });
