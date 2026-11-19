@@ -604,7 +604,7 @@ Pebble.registerActionHandler(async function(request,respond) {
       // Compact, bounded response for Pebble AppMessage. Never include credentials or arbitrary attributes.
       r=await api('/api/states');
       if(r.ok&&Array.isArray(r.data)){
-        var enabled={light:1,switch:1,input_boolean:1,fan:1,cover:1,scene:1,script:1,automation:1};
+        var enabled={light:1,switch:1,input_boolean:1,fan:1,scene:1,script:1,automation:1};
         // HA's /api/states does not contain area membership. Join registries via
         // read-only WebSocket discovery, with a graceful fallback for unavailable sockets.
         var registries=await Promise.all([
