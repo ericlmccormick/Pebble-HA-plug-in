@@ -60,7 +60,7 @@ jobs:
           TAG=dev-ha-quick-controls
           if [[ "$GITHUB_REF_NAME" == "main" ]]; then TAG=dev-latest; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create dev-latest \
+            gh release create "$TAG" \
               --target "$GITHUB_SHA" \
               --title "Latest development build (not a stable release)" \
               --notes "Automatically updated from successful main-branch builds. Install only for testing. The downloadable PBW is a Pebble package, not a ZIP to extract." \
