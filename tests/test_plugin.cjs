@@ -68,6 +68,16 @@ const context={Pebble,console,Date,JSON,Number,String,Object,Array,Promise,isFin
       path==='/api/conversation/process'?{conversation_id:'abc',response:{speech:{plain:{speech:'Lights are on.'}}}}:
       path==='/api/tts_get_url'?{path:'/api/tts_proxy/demo.wav'}:
       {entity_id:'light.kitchen',state:'on',attributes:{}};
+    if(path==='/api/template'){
+      const body=JSON.parse(opt.body);
+      const ids=[...body.template.matchAll(/area_name\("([^"]+)"\)/g)].map(m=>m[1]);
+      assert(ids.length>0,'Template requests explicit entity-to-room mappings');
+      assert(body.template.includes('to_json'),'Room result must be structured JSON');
+      const rooms=ids.map(id=>id==='light.kitchen'?'Kitchen':id==='fan.office'?'Office':'');
+      const rendered=JSON.stringify(rooms);
+      return {ok:true,status:200,headers:{get:()=> 'text/plain'},
+        text:async()=>rendered};
+    }
     if(path==='/api/tts_proxy/demo.wav'){
       if(transientProxyFailures>0){
         transientProxyFailures--;
@@ -147,6 +157,10 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   assert(controls1.length>0,'Additional devices remain discoverable');
   assert(!controls1.some(row=>controls0.some(first=>first.id===row.id)),
     'Fan-prioritized pagination must never duplicate entities');
+  assert(controls0.some(row=>row.id==='fan.office'&&row.room==='Office'),
+    'JSON room mapping retains fan area without newline-offset errors');
+  assert(controls0.some(row=>row.id==='light.kitchen'&&row.room==='Kitchen'),
+    'JSON room mapping retains assigned light area');
   assert(controls0.some(row=>row.id==='light.kitchen'&&row.advanced===false),
     'On/off-only lights do not request detail screens');
   const metaPage=await callAction('list_controls',{offset:0,metadata_only:true});
