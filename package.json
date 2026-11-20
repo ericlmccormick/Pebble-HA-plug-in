@@ -1,7 +1,7 @@
 {
   "name": "pebble-home-assistant-plugin",
   "author": "Eric McCormick",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "pebble": {
     "displayName": "Home Assistant Bridge",
     "uuid": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57",
@@ -131,7 +131,7 @@
         },
         {
           "name": "list_controls",
-          "description": "Page through all controllable entities by offset, prioritizing fans. metadata_only returns names, IDs, rooms and types without status or advanced controls.",
+          "description": "Page through lights, fans, switches, covers, locks, scenes, scripts and automations, including room metadata.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -147,6 +147,25 @@
           },
           "callerPermissions": [
             "HomeRead"
+          ]
+        },
+        {
+          "name": "secure_control",
+          "description": "Confirmable lock or cover action: reads current state, then locks/unlocks or opens/closes; rejects unknown or moving states.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entity_id"
+            ],
+            "additionalProperties": false
+          },
+          "callerPermissions": [
+            "HomeControl"
           ]
         },
         {
