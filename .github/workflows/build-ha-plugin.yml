@@ -2,7 +2,7 @@ name: Build Home Assistant Plugin
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/ha-room-navigation]
+    branches: [main, feature/watch-settings-fan-refresh]
     paths:
       - 'package.json'
       - 'src/**'
@@ -57,7 +57,7 @@ jobs:
         run: |
           # Action artifacts are always ZIP archives. A GitHub Release asset
           # preserves the .pbw extension and downloads directly to the phone.
-          TAG=dev-ha-room-navigation
+          TAG=dev-ha-fan-refresh
           if [[ "$GITHUB_REF_NAME" == "main" ]]; then TAG=dev-latest; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
