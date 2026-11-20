@@ -630,17 +630,24 @@ Pebble.registerActionHandler(async function(request,respond) {
         var roomById={},templateOk=false;
         if(candidates.length){
           var ids=candidates.map(function(e){return e.entity_id;});
-          var template='{% for entity in '+JSON.stringify(ids)+
-            ' %}{{ area_name(entity) or "" }}\n{% endfor %}';
+          // A newline-delimited Jinja loop can emit blank/extra lines and
+          // shift every room onto the wrong entity. Request a JSON array
+          // instead: one explicit array position for each entity ID.
+          var template='{{ ['+ids.map(function(id){
+            return 'area_name('+JSON.stringify(id)+')';
+          }).join(', ')+'] | to_json }}';
           var rendered=await api('/api/template','POST',{template:template});
           if(rendered.ok&&typeof rendered.data==='string'){
-            var lines=rendered.data.replace(/\r/g,'').split('\n');
-            if(lines.length>=ids.length){
-              ids.forEach(function(id,i){
-                roomById[id]=String(lines[i]||'').trim();
-              });
-              templateOk=true;
-            }
+            try {
+              var rooms=JSON.parse(rendered.data.trim());
+              if(Array.isArray(rooms)&&rooms.length===ids.length){
+                ids.forEach(function(id,i){
+                  roomById[id]=typeof rooms[i]==='string'?rooms[i].trim():'';
+                });
+                // Do not treat a completely empty lookup as valid area data.
+                templateOk=rooms.some(function(room){return typeof room==='string'&&room.trim();});
+              }
+            }catch(e){}
           }
         }
         // Best-effort fallback for older Home Assistant versions. Failure
