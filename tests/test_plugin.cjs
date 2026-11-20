@@ -147,6 +147,10 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   });
   extraControlStates.push({entity_id:'fan.office',state:'on',attributes:{
     friendly_name:'Office fan',percentage:35,supported_features:1}});
+  extraControlStates.push({entity_id:'cover.garage_door',state:'closed',
+    attributes:{friendly_name:'Garage Door',device_class:'garage'}});
+  extraControlStates.push({entity_id:'lock.front_door',state:'locked',
+    attributes:{friendly_name:'Front Door Lock'}});
   const page0=await callAction('list_controls',{offset:0});
   const page1=await callAction('list_controls',{offset:48});
   assert(page0.ok&&page1.ok,'Paged control discovery succeeds');
@@ -155,6 +159,10 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   assert(controls0.some(row=>row.id==='fan.office'&&row.advanced===true),
     'Fan is prioritized ahead of 48 ordinary switches and supports speed');
   assert(controls1.length>0,'Additional devices remain discoverable');
+  assert(controls0.some(r=>r.id==='cover.garage_door'&&r.domain==='cover'),
+    'Garage door appears in the discovered entity catalog');
+  assert(controls0.some(r=>r.id==='lock.front_door'&&r.domain==='lock'),
+    'Front door lock appears in the discovered entity catalog');
   assert(!controls1.some(row=>controls0.some(first=>first.id===row.id)),
     'Fan-prioritized pagination must never duplicate entities');
   assert(controls0.some(row=>row.id==='fan.office'&&row.room==='Office'),
