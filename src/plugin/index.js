@@ -609,9 +609,12 @@ Pebble.registerActionHandler(async function(request,respond) {
         // to resolve each entity's effective area with its own area_name()
         // helper (entity assignment takes precedence over device assignment).
         // This avoids depending on WebSockets, which some plugin runtimes lack.
+        // Each call returns at most 48 entities. The phone requests subsequent
+        // pages; the first-page cutoff previously hid fans in larger homes.
+        var offset=Math.max(0,Math.min(240,Math.floor(Number(args.offset)||0)));
         var candidates=r.data.filter(function(e){
           return e&&typeof e.entity_id==='string'&&enabled[e.entity_id.split('.')[0]];
-        }).slice(0,48);
+        }).slice(offset,offset+48);
         var roomById={},templateOk=false;
         if(candidates.length){
           var ids=candidates.map(function(e){return e.entity_id;});
@@ -656,9 +659,15 @@ Pebble.registerActionHandler(async function(request,respond) {
         }
         r.data=candidates.map(function(e){
           var domain=e.entity_id.split('.')[0],a=e.attributes||{};
+          var modes=Array.isArray(a.supported_color_modes)?a.supported_color_modes:[];
+          var advanced=domain==='light'?
+            (typeof a.brightness==='number'||modes.some(function(mode){return mode!=='onoff';})):
+            domain==='fan'?
+            (typeof a.percentage==='number'||((Number(a.supported_features)||0)&1)!==0):false;
           return {id:e.entity_id,name:String(a.friendly_name||e.entity_id).slice(0,48),
             room:String(roomById[e.entity_id]||'Unassigned').slice(0,36),
             state:String(e.state||'unknown').slice(0,24),domain:domain,
+            advanced:advanced,
             brightness:typeof a.brightness==='number'?Math.round(a.brightness*100/255):-1};
         });
       }
