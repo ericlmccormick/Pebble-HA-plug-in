@@ -149,6 +149,23 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
     'Fan-prioritized pagination must never duplicate entities');
   assert(controls0.some(row=>row.id==='light.kitchen'&&row.advanced===false),
     'On/off-only lights do not request detail screens');
+  const metaPage=await callAction('list_controls',{offset:0,metadata_only:true});
+  assert(metaPage.ok);
+  const onlyMeta=JSON.parse(metaPage.text);
+  assert(onlyMeta.length>0);
+  assert(onlyMeta.every(row=>row.id&&row.name&&row.room&&row.domain&&
+    !('state' in row)&&!('advanced' in row)&&!('brightness' in row)),
+    'Metadata-only discovery must omit status and capabilities');
+  const catalogAction=pkg.plugin.actions.find(a=>a.name==='list_controls');
+  assert(!('maximum' in catalogAction.parameters.properties.offset),
+    'Bridge offset must not impose a 960-device cutoff');
+  extraControlStates=Array.from({length:1030},(_,i)=>({
+    entity_id:'switch.many_'+String(i).padStart(4,'0'),state:'off',
+    attributes:{friendly_name:'Device '+i}
+  }));
+  const distant=await callAction('list_controls',{offset:1008,metadata_only:true});
+  assert(distant.ok&&JSON.parse(distant.text).length>0,
+    'Device discovery works beyond the old 960-entity limit');
   extraControlStates=[];
 
   assert.strictEqual((await callConfig({type:'status'})).allow_local_http,true);
