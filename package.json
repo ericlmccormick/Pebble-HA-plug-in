@@ -1,7 +1,7 @@
 {
   "name": "pebble-home-assistant-plugin",
   "author": "Eric McCormick",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "pebble": {
     "displayName": "Home Assistant Bridge",
     "uuid": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57",
@@ -131,14 +131,16 @@
         },
         {
           "name": "list_controls",
-          "description": "List 48 controllable entities per page (fans first), with room and advanced capabilities. Use offset 0,48,96...",
+          "description": "Page through all controllable entities by offset, prioritizing fans. metadata_only returns names, IDs, rooms and types without status or advanced controls.",
           "parameters": {
             "type": "object",
             "properties": {
               "offset": {
                 "type": "integer",
-                "minimum": 0,
-                "maximum": 960
+                "minimum": 0
+              },
+              "metadata_only": {
+                "type": "boolean"
               }
             },
             "additionalProperties": false
