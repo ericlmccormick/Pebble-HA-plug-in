@@ -613,7 +613,7 @@ Pebble.registerActionHandler(async function(request,respond) {
         // switches before other controls, so the most useful devices are
         // available even to installations with a 48-row watch limit.
         // Stable entity-id order prevents duplicate rows between pages.
-        var offset=Math.max(0,Math.min(960,Math.floor(Number(args.offset)||0)));
+        var offset=Math.max(0,Math.floor(Number(args.offset)||0));
         var candidates=r.data.filter(function(e){
           return e&&typeof e.entity_id==='string'&&enabled[e.entity_id.split('.')[0]];
         }).sort(function(a,b){
@@ -671,6 +671,11 @@ Pebble.registerActionHandler(async function(request,respond) {
         }
         r.data=candidates.map(function(e){
           var domain=e.entity_id.split('.')[0],a=e.attributes||{};
+          if(args.metadata_only===true)return {
+            id:e.entity_id,name:String(a.friendly_name||e.entity_id).slice(0,48),
+            room:String(roomById[e.entity_id]||'Unassigned').slice(0,36),
+            domain:domain
+          };
           var modes=Array.isArray(a.supported_color_modes)?a.supported_color_modes:[];
           var advanced=domain==='light'?
             (typeof a.brightness==='number'||modes.some(function(mode){return mode!=='onoff';})):
