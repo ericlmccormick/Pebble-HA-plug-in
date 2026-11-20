@@ -2,7 +2,7 @@ name: Build Home Assistant Plugin
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/unlimited-device-catalog]
+    branches: [main, fix/room-mapping-device-filter]
     paths:
       - 'package.json'
       - 'src/**'
@@ -57,7 +57,7 @@ jobs:
         run: |
           # Action artifacts are always ZIP archives. A GitHub Release asset
           # preserves the .pbw extension and downloads directly to the phone.
-          TAG=dev-ha-unlimited-catalog
+          TAG=dev-ha-room-mapping-fix
           if [[ "$GITHUB_REF_NAME" == "main" ]]; then TAG=dev-latest; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
