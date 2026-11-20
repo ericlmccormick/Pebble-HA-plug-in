@@ -18,6 +18,7 @@ for(const name of ['tts_prepare','tts_chunk','tts_release'])
 assert(pkg.plugin.sources.find(s=>s.items.includes('entity')).callerPermissions.includes('HomeRead'));
 let config,source,action,stored={},local={},calls=[];
 let transientProxyFailures=0;
+let extraControlStates=[];
 const secure={
   getItem:async k=>stored[k]||null,
   setItem:async(k,v)=>{stored[k]=v;},
@@ -63,7 +64,7 @@ const context={Pebble,console,Date,JSON,Number,String,Object,Array,Promise,isFin
     const path=new URL(url).pathname;
     let data=path==='/api/config'?{location_name:'Test Home'}:
       path==='/api/states'?[{entity_id:'sensor.temp',state:'21.5',attributes:{friendly_name:'Temperature',unit_of_measurement:'°C'}},
-        {entity_id:'light.kitchen',state:'on',attributes:{friendly_name:'Kitchen'}}]:
+        {entity_id:'light.kitchen',state:'on',attributes:{friendly_name:'Kitchen'}}].concat(extraControlStates):
       path==='/api/conversation/process'?{conversation_id:'abc',response:{speech:{plain:{speech:'Lights are on.'}}}}:
       path==='/api/tts_get_url'?{path:'/api/tts_proxy/demo.wav'}:
       {entity_id:'light.kitchen',state:'on',attributes:{}};
@@ -128,6 +129,25 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   let localSaved=await callConfig({type:'save',url:'http://192.168.1.2:8123',
     token:'',allow_local_http:true});
   assert(localSaved.ok,'Opt-in LAN HTTP saves using existing secure token');
+  // Control discovery is paged. A fan after entity #48 must be returned on
+  // the next page and must declare speed-capable detail controls.
+  extraControlStates=[];
+  for(let i=0;i<53;i++)extraControlStates.push({
+    entity_id:'switch.mock_'+i,state:'off',attributes:{friendly_name:'Switch '+i}
+  });
+  extraControlStates.push({entity_id:'fan.office',state:'on',attributes:{
+    friendly_name:'Office fan',percentage:35,supported_features:1}});
+  const page0=await callAction('list_controls',{offset:0});
+  const page1=await callAction('list_controls',{offset:48});
+  assert(page0.ok&&page1.ok,'Paged control discovery succeeds');
+  const controls0=JSON.parse(page0.text),controls1=JSON.parse(page1.text);
+  assert.strictEqual(controls0.length,48);
+  assert(controls1.some(row=>row.id==='fan.office'&&row.advanced===true),
+    'Fan past page one is discoverable with speed capability');
+  assert(controls0.some(row=>row.id==='light.kitchen'&&row.advanced===false),
+    'On/off-only lights do not request detail screens');
+  extraControlStates=[];
+
   assert.strictEqual((await callConfig({type:'status'})).allow_local_http,true);
   assert.strictEqual(local.ha_bridge_url,'http://192.168.1.2:8123');
   const discoverLocal=await callConfig({type:'voice_discover'});
