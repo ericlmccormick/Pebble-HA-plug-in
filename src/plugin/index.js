@@ -604,7 +604,7 @@ Pebble.registerActionHandler(async function(request,respond) {
       // Compact, bounded response for Pebble AppMessage. Never include credentials or arbitrary attributes.
       r=await api('/api/states');
       if(r.ok&&Array.isArray(r.data)){
-        var enabled={light:1,switch:1,input_boolean:1,fan:1,scene:1,script:1,automation:1};
+        var enabled={light:1,switch:1,input_boolean:1,fan:1,cover:1,lock:1,scene:1,script:1,automation:1};
         // Home Assistant REST states contain no area/room. Ask Home Assistant
         // to resolve each entity's effective area with its own area_name()
         // helper (entity assignment takes precedence over device assignment).
@@ -696,6 +696,32 @@ Pebble.registerActionHandler(async function(request,respond) {
         });
       }
       break;
+    }
+    case 'secure_control': {
+      // Dedicated, state-aware control action. Lock and door movements are
+      // never routed through the generic toggle endpoint. The watch requires
+      // a second explicit Select before invoking this action.
+      var secureId=String(args.entity_id||'');
+      var secureDomain=secureId.split('.')[0];
+      if(!safeId(secureId)||(secureDomain!=='lock'&&secureDomain!=='cover')){
+        respond.error('INVALID_ARGS','Not a permitted secure entity');return;
+      }
+      var current=await api('/api/states/'+encodeURIComponent(secureId));
+      if(!current.ok){respond.error(current.code,current.message);return;}
+      var state=String(current.data&&current.data.state||'');
+      var service='';
+      if(secureDomain==='lock'){
+        if(state==='locked')service='unlock';
+        else if(state==='unlocked')service='lock';
+      }else if(secureDomain==='cover'){
+        if(state==='closed')service='open_cover';
+        else if(state==='open')service='close_cover';
+      }
+      if(!service){
+        respond.error('INVALID_STATE','Door or lock state uncertain; action blocked');return;
+      }
+      r=await api('/api/services/'+secureDomain+'/'+service,'POST',{entity_id:secureId});
+      refresh=['agent/entity'];break;
     }
     case 'control_entity': {
       var id=String(args.entity_id||''),domain=id.split('.')[0];
