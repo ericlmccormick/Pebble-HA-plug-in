@@ -129,8 +129,8 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   let localSaved=await callConfig({type:'save',url:'http://192.168.1.2:8123',
     token:'',allow_local_http:true});
   assert(localSaved.ok,'Opt-in LAN HTTP saves using existing secure token');
-  // Control discovery is paged. A fan after entity #48 must be returned on
-  // the next page and must declare speed-capable detail controls.
+  // Fan controls are prioritized into the first discovery page even when
+  // there are more than 48 entities. Later pages must remain unique.
   extraControlStates=[];
   for(let i=0;i<53;i++)extraControlStates.push({
     entity_id:'switch.mock_'+i,state:'off',attributes:{friendly_name:'Switch '+i}
@@ -142,8 +142,11 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   assert(page0.ok&&page1.ok,'Paged control discovery succeeds');
   const controls0=JSON.parse(page0.text),controls1=JSON.parse(page1.text);
   assert.strictEqual(controls0.length,48);
-  assert(controls1.some(row=>row.id==='fan.office'&&row.advanced===true),
-    'Fan past page one is discoverable with speed capability');
+  assert(controls0.some(row=>row.id==='fan.office'&&row.advanced===true),
+    'Fan is prioritized ahead of 48 ordinary switches and supports speed');
+  assert(controls1.length>0,'Additional devices remain discoverable');
+  assert(!controls1.some(row=>controls0.some(first=>first.id===row.id)),
+    'Fan-prioritized pagination must never duplicate entities');
   assert(controls0.some(row=>row.id==='light.kitchen'&&row.advanced===false),
     'On/off-only lights do not request detail screens');
   extraControlStates=[];
