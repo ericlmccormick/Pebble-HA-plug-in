@@ -163,6 +163,10 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
     'JSON room mapping retains assigned light area');
   assert(controls0.some(row=>row.id==='light.kitchen'&&row.advanced===false),
     'On/off-only lights do not request detail screens');
+  assert(pkg.plugin.actions.some(a=>a.name==='secure_control'&&
+    a.callerPermissions.includes('HomeControl')));
+  assert(fs.readFileSync(path.join(root,pkg.plugin.script),'utf8').includes('cover:1,lock:1'),
+    'Device catalog contains garage cover and lock domains');
   const metaPage=await callAction('list_controls',{offset:0,metadata_only:true});
   assert(metaPage.ok);
   const onlyMeta=JSON.parse(metaPage.text);
