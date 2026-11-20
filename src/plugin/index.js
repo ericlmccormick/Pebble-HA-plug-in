@@ -609,11 +609,23 @@ Pebble.registerActionHandler(async function(request,respond) {
         // to resolve each entity's effective area with its own area_name()
         // helper (entity assignment takes precedence over device assignment).
         // This avoids depending on WebSockets, which some plugin runtimes lack.
-        // Each call returns at most 48 entities. The phone requests subsequent
-        // pages; the first-page cutoff previously hid fans in larger homes.
-        var offset=Math.max(0,Math.min(240,Math.floor(Number(args.offset)||0)));
+        // Device discovery is paginated (48/page). Favor fans and fan-like
+        // switches before other controls, so the most useful devices are
+        // available even to installations with a 48-row watch limit.
+        // Stable entity-id order prevents duplicate rows between pages.
+        var offset=Math.max(0,Math.min(960,Math.floor(Number(args.offset)||0)));
         var candidates=r.data.filter(function(e){
           return e&&typeof e.entity_id==='string'&&enabled[e.entity_id.split('.')[0]];
+        }).sort(function(a,b){
+          function priority(e){
+            var domain=e.entity_id.split('.')[0];
+            if(domain==='fan')return 0;
+            if(domain==='switch'&&/\b(fan|ventilator|exhaust|air.handler)\b/i.test(
+              String((e.attributes&&e.attributes.friendly_name)||e.entity_id)))return 1;
+            return 2;
+          }
+          var order=priority(a)-priority(b);
+          return order||a.entity_id.localeCompare(b.entity_id);
         }).slice(offset,offset+48);
         var roomById={},templateOk=false;
         if(candidates.length){
