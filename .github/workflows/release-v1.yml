@@ -25,7 +25,7 @@ jobs:
           node-version: '22'
       - name: Validate plugin and shared audio SDK
         run: |
-          node -e "const p=require('./package.json');if(!p.version.startsWith('1.0.')||p.pebble.projectType!=='plugin')process.exit(1)"
+          node -e "const p=require('./package.json');if(p.version!=='1.1.0'||p.pebble.projectType!=='plugin')process.exit(1)"
           node --check src/plugin/index.js
           node --check sdk/ha_audio.js
           node tests/test_plugin.cjs
@@ -71,6 +71,6 @@ jobs:
           gh release create "$TAG" "$ASSET" \
             --target "$GITHUB_SHA" \
             --title "Home Assistant Bridge ${VERSION}" \
-            --notes "Stable Home Assistant Bridge update. Version ${VERSION} adds optional local-network HTTP access, restricted to private IPv4 or .local hosts. HTTPS stays the default. Plain HTTP transmits Home Assistant tokens and data unencrypted." \
+            --notes "Home Assistant Bridge 1.1.0 adds expanded Home Assistant device discovery, status and service controls for Control Center 2.0, and optional local-network HTTP. HTTPS is recommended; plain HTTP sends tokens and data unencrypted." \
             --latest
           echo "Stable PBW: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET" >> "$GITHUB_STEP_SUMMARY"

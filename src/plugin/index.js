@@ -600,6 +600,140 @@ var SAFE_READ=/^\/api\/(?:config|services|states(?:\/[a-z][a-z0-9_]*\.[a-z0-9_]+
 Pebble.registerActionHandler(async function(request,respond) {
   var args=request.args||{},r,refresh=[];
   switch(request.action){
+    case 'list_controls': {
+      // Compact, bounded response for Pebble AppMessage. Never include credentials or arbitrary attributes.
+      r=await api('/api/states');
+      if(r.ok&&Array.isArray(r.data)){
+        var enabled={light:1,switch:1,input_boolean:1,fan:1,cover:1,lock:1,scene:1,script:1,automation:1};
+        // Home Assistant REST states contain no area/room. Ask Home Assistant
+        // to resolve each entity's effective area with its own area_name()
+        // helper (entity assignment takes precedence over device assignment).
+        // This avoids depending on WebSockets, which some plugin runtimes lack.
+        // Device discovery is paginated (48/page). Favor fans and fan-like
+        // switches before other controls, so the most useful devices are
+        // available even to installations with a 48-row watch limit.
+        // Stable entity-id order prevents duplicate rows between pages.
+        var offset=Math.max(0,Math.floor(Number(args.offset)||0));
+        var candidates=r.data.filter(function(e){
+          return e&&typeof e.entity_id==='string'&&enabled[e.entity_id.split('.')[0]];
+        }).sort(function(a,b){
+          function priority(e){
+            var domain=e.entity_id.split('.')[0];
+            if(domain==='fan')return 0;
+            if(domain==='switch'&&/\b(fan|ventilator|exhaust|air.handler)\b/i.test(
+              String((e.attributes&&e.attributes.friendly_name)||e.entity_id)))return 1;
+            return 2;
+          }
+          var order=priority(a)-priority(b);
+          return order||a.entity_id.localeCompare(b.entity_id);
+        }).slice(offset,offset+48);
+        var roomById={},templateOk=false;
+        if(candidates.length){
+          var ids=candidates.map(function(e){return e.entity_id;});
+          // A newline-delimited Jinja loop can emit blank/extra lines and
+          // shift every room onto the wrong entity. Request a JSON array
+          // instead: one explicit array position for each entity ID.
+          var template='{{ ['+ids.map(function(id){
+            return 'area_name('+JSON.stringify(id)+')';
+          }).join(', ')+'] | to_json }}';
+          var rendered=await api('/api/template','POST',{template:template});
+          if(rendered.ok&&typeof rendered.data==='string'){
+            try {
+              var rooms=JSON.parse(rendered.data.trim());
+              if(Array.isArray(rooms)&&rooms.length===ids.length){
+                ids.forEach(function(id,i){
+                  roomById[id]=typeof rooms[i]==='string'?rooms[i].trim():'';
+                });
+                // Do not treat a completely empty lookup as valid area data.
+                templateOk=rooms.some(function(room){return typeof room==='string'&&room.trim();});
+              }
+            }catch(e){}
+          }
+        }
+        // Best-effort fallback for older Home Assistant versions. Failure
+        // here never blocks device discovery or control actions.
+        if(!templateOk){
+          var registries=await Promise.all([
+            wsList('config/entity_registry/list'),
+            wsList('config/device_registry/list'),
+            wsList('config/area_registry/list')
+          ]);
+          var entityAreas={},deviceAreas={},areaNames={};
+          if(registries[2].ok&&Array.isArray(registries[2].data))
+            registries[2].data.forEach(function(a){
+              if(a.area_id)areaNames[a.area_id]=String(a.name||a.area_id);
+            });
+          if(registries[1].ok&&Array.isArray(registries[1].data))
+            registries[1].data.forEach(function(d){
+              if(d.id)deviceAreas[d.id]=d.area_id||'';
+            });
+          if(registries[0].ok&&Array.isArray(registries[0].data))
+            registries[0].data.forEach(function(e){
+              if(e.entity_id)entityAreas[e.entity_id]=e.area_id||deviceAreas[e.device_id]||'';
+            });
+          ids=candidates.map(function(e){return e.entity_id;});
+          ids.forEach(function(id){
+            roomById[id]=areaNames[entityAreas[id]]||'';
+          });
+        }
+        r.data=candidates.map(function(e){
+          var domain=e.entity_id.split('.')[0],a=e.attributes||{};
+          if(args.metadata_only===true)return {
+            id:e.entity_id,name:String(a.friendly_name||e.entity_id).slice(0,48),
+            room:String(roomById[e.entity_id]||'Unassigned').slice(0,36),
+            domain:domain
+          };
+          var modes=Array.isArray(a.supported_color_modes)?a.supported_color_modes:[];
+          var advanced=domain==='light'?
+            (typeof a.brightness==='number'||modes.some(function(mode){return mode!=='onoff';})):
+            domain==='fan'?
+            (typeof a.percentage==='number'||((Number(a.supported_features)||0)&1)!==0):false;
+          return {id:e.entity_id,name:String(a.friendly_name||e.entity_id).slice(0,48),
+            room:String(roomById[e.entity_id]||'Unassigned').slice(0,36),
+            state:String(e.state||'unknown').slice(0,24),domain:domain,
+            advanced:advanced,
+            brightness:typeof a.brightness==='number'?Math.round(a.brightness*100/255):-1};
+        });
+      }
+      break;
+    }
+    case 'secure_control': {
+      // Dedicated, state-aware control action. Lock and door movements are
+      // never routed through the generic toggle endpoint. The watch requires
+      // a second explicit Select before invoking this action.
+      var secureId=String(args.entity_id||'');
+      var secureDomain=secureId.split('.')[0];
+      if(!safeId(secureId)||(secureDomain!=='lock'&&secureDomain!=='cover')){
+        respond.error('INVALID_ARGS','Not a permitted secure entity');return;
+      }
+      var current=await api('/api/states/'+encodeURIComponent(secureId));
+      if(!current.ok){respond.error(current.code,current.message);return;}
+      var state=String(current.data&&current.data.state||'');
+      var service='';
+      if(secureDomain==='lock'){
+        if(state==='locked')service='unlock';
+        else if(state==='unlocked')service='lock';
+      }else if(secureDomain==='cover'){
+        if(state==='closed')service='open_cover';
+        else if(state==='open')service='close_cover';
+      }
+      if(!service){
+        respond.error('INVALID_STATE','Door or lock state uncertain; action blocked');return;
+      }
+      r=await api('/api/services/'+secureDomain+'/'+service,'POST',{entity_id:secureId});
+      refresh=['agent/entity'];break;
+    }
+    case 'control_entity': {
+      var id=String(args.entity_id||''),domain=id.split('.')[0];
+      if(!safeId(id)){respond.error('INVALID_ARGS','Invalid entity');return;}
+      // Deliberately exclude locks, doors, alarm panels and other sensitive devices.
+      var toggle={light:1,switch:1,input_boolean:1,fan:1};
+      var press={scene:1,script:1,automation:1};
+      var service=toggle[domain]?'toggle':press[domain]?(domain==='automation'?'trigger':'turn_on'):null;
+      if(!service){respond.error('INVALID_ARGS','Unsupported quick control');return;}
+      r=await api('/api/services/'+domain+'/'+service,'POST',{entity_id:id});
+      refresh=['agent/entity'];break;
+    }
     case 'get_state':
       if(!safeId(args.entity_id)){respond.error('INVALID_ARGS','Invalid entity_id');return;}
       r=await api('/api/states/'+encodeURIComponent(args.entity_id));break;

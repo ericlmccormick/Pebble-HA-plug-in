@@ -18,6 +18,7 @@ for(const name of ['tts_prepare','tts_chunk','tts_release'])
 assert(pkg.plugin.sources.find(s=>s.items.includes('entity')).callerPermissions.includes('HomeRead'));
 let config,source,action,stored={},local={},calls=[];
 let transientProxyFailures=0;
+let extraControlStates=[];
 const secure={
   getItem:async k=>stored[k]||null,
   setItem:async(k,v)=>{stored[k]=v;},
@@ -63,10 +64,20 @@ const context={Pebble,console,Date,JSON,Number,String,Object,Array,Promise,isFin
     const path=new URL(url).pathname;
     let data=path==='/api/config'?{location_name:'Test Home'}:
       path==='/api/states'?[{entity_id:'sensor.temp',state:'21.5',attributes:{friendly_name:'Temperature',unit_of_measurement:'°C'}},
-        {entity_id:'light.kitchen',state:'on',attributes:{friendly_name:'Kitchen'}}]:
+        {entity_id:'light.kitchen',state:'on',attributes:{friendly_name:'Kitchen'}}].concat(extraControlStates):
       path==='/api/conversation/process'?{conversation_id:'abc',response:{speech:{plain:{speech:'Lights are on.'}}}}:
       path==='/api/tts_get_url'?{path:'/api/tts_proxy/demo.wav'}:
       {entity_id:'light.kitchen',state:'on',attributes:{}};
+    if(path==='/api/template'){
+      const body=JSON.parse(opt.body);
+      const ids=[...body.template.matchAll(/area_name\("([^"]+)"\)/g)].map(m=>m[1]);
+      assert(ids.length>0,'Template requests explicit entity-to-room mappings');
+      assert(body.template.includes('to_json'),'Room result must be structured JSON');
+      const rooms=ids.map(id=>id==='light.kitchen'?'Kitchen':id==='fan.office'?'Office':'');
+      const rendered=JSON.stringify(rooms);
+      return {ok:true,status:200,headers:{get:()=> 'text/plain'},
+        text:async()=>rendered};
+    }
     if(path==='/api/tts_proxy/demo.wav'){
       if(transientProxyFailures>0){
         transientProxyFailures--;
@@ -128,6 +139,61 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   let localSaved=await callConfig({type:'save',url:'http://192.168.1.2:8123',
     token:'',allow_local_http:true});
   assert(localSaved.ok,'Opt-in LAN HTTP saves using existing secure token');
+  // Fan controls are prioritized into the first discovery page even when
+  // there are more than 48 entities. Later pages must remain unique.
+  extraControlStates=[];
+  for(let i=0;i<53;i++)extraControlStates.push({
+    entity_id:'switch.mock_'+i,state:'off',attributes:{friendly_name:'Switch '+i}
+  });
+  extraControlStates.push({entity_id:'fan.office',state:'on',attributes:{
+    friendly_name:'Office fan',percentage:35,supported_features:1}});
+  extraControlStates.push({entity_id:'cover.garage_door',state:'closed',
+    attributes:{friendly_name:'Garage Door',device_class:'garage'}});
+  extraControlStates.push({entity_id:'lock.front_door',state:'locked',
+    attributes:{friendly_name:'Front Door Lock'}});
+  const page0=await callAction('list_controls',{offset:0});
+  const page1=await callAction('list_controls',{offset:48});
+  assert(page0.ok&&page1.ok,'Paged control discovery succeeds');
+  const controls0=JSON.parse(page0.text),controls1=JSON.parse(page1.text);
+  assert.strictEqual(controls0.length,48);
+  assert(controls0.some(row=>row.id==='fan.office'&&row.advanced===true),
+    'Fan is prioritized ahead of 48 ordinary switches and supports speed');
+  assert(controls1.length>0,'Additional devices remain discoverable');
+  assert(controls0.some(r=>r.id==='cover.garage_door'&&r.domain==='cover'),
+    'Garage door appears in the discovered entity catalog');
+  assert(controls0.some(r=>r.id==='lock.front_door'&&r.domain==='lock'),
+    'Front door lock appears in the discovered entity catalog');
+  assert(!controls1.some(row=>controls0.some(first=>first.id===row.id)),
+    'Fan-prioritized pagination must never duplicate entities');
+  assert(controls0.some(row=>row.id==='fan.office'&&row.room==='Office'),
+    'JSON room mapping retains fan area without newline-offset errors');
+  assert(controls0.some(row=>row.id==='light.kitchen'&&row.room==='Kitchen'),
+    'JSON room mapping retains assigned light area');
+  assert(controls0.some(row=>row.id==='light.kitchen'&&row.advanced===false),
+    'On/off-only lights do not request detail screens');
+  assert(pkg.plugin.actions.some(a=>a.name==='secure_control'&&
+    a.callerPermissions.includes('HomeControl')));
+  assert(fs.readFileSync(path.join(root,pkg.plugin.script),'utf8').includes('cover:1,lock:1'),
+    'Device catalog contains garage cover and lock domains');
+  const metaPage=await callAction('list_controls',{offset:0,metadata_only:true});
+  assert(metaPage.ok);
+  const onlyMeta=JSON.parse(metaPage.text);
+  assert(onlyMeta.length>0);
+  assert(onlyMeta.every(row=>row.id&&row.name&&row.room&&row.domain&&
+    !('state' in row)&&!('advanced' in row)&&!('brightness' in row)),
+    'Metadata-only discovery must omit status and capabilities');
+  const catalogAction=pkg.plugin.actions.find(a=>a.name==='list_controls');
+  assert(!('maximum' in catalogAction.parameters.properties.offset),
+    'Bridge offset must not impose a 960-device cutoff');
+  extraControlStates=Array.from({length:1030},(_,i)=>({
+    entity_id:'switch.many_'+String(i).padStart(4,'0'),state:'off',
+    attributes:{friendly_name:'Device '+i}
+  }));
+  const distant=await callAction('list_controls',{offset:1008,metadata_only:true});
+  assert(distant.ok&&JSON.parse(distant.text).length>0,
+    'Device discovery works beyond the old 960-entity limit');
+  extraControlStates=[];
+
   assert.strictEqual((await callConfig({type:'status'})).allow_local_http,true);
   assert.strictEqual(local.ha_bridge_url,'http://192.168.1.2:8123');
   const discoverLocal=await callConfig({type:'voice_discover'});
