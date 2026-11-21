@@ -38,7 +38,7 @@ The setting is deliberately restricted to RFC1918 private IPv4 ranges (`10.0.0.0
 2. Build or download the GitHub Actions **Build Home Assistant Plugin** artifact.
 3. Extract and sideload the plugin-only `.pbw`. It won't appear as a watchapp.
 4. Open the **Home Assistant Bridge** plugin's settings page in Pebble.
-5. Set your externally reachable **HTTPS** Home Assistant URL and a long-lived access token.
+5. Enter your Home Assistant URL and a long-lived access token. For home-network-only setups, see [Local HTTP](#local-http-opt-in-insecure) to use a private LAN address.
 6. Grant the network permissions; tap **Test connection**.
 7. Install an app using the plugin and grant its declared read/converse/control permissions.
 
