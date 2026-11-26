@@ -72,8 +72,10 @@ async function api(path,method,body) {
             hint=' (bad request; check Home Assistant logs)';
         }catch(e){}
       }
-      return failure(res.status===401||res.status===403?'AUTH_REQUIRED':'PLUGIN_UNAVAILABLE',
+      var failed=failure(res.status===401||res.status===403?'AUTH_REQUIRED':'PLUGIN_UNAVAILABLE',
         'Home Assistant HTTP '+res.status+hint);
+      failed.status=res.status;
+      return failed;
     }
     var contentType=res.headers&&res.headers.get&&res.headers.get('content-type')||'';
     var data=contentType.indexOf('json')>=0?await res.json():await res.text();
@@ -204,6 +206,42 @@ function sourceProperties(state) {
   if(a.unit_of_measurement)prop.unit={shortText:{text:String(a.unit_of_measurement).slice(0,32)}};
   return prop;
 }
+// Complication slots address a source instance by position, so once the
+// user pins entities the source lists exactly those, in the saved order. A
+// pinned entity missing from Home Assistant keeps its position as
+// 'unavailable'. Without pins the source lists all states.
+var PINNED_KEY='ha_pinned_entities_v1',MAX_PINNED=50;
+function pinnedEntities(){
+  try{
+    var list=JSON.parse(localStorage.getItem(PINNED_KEY)||'[]');
+    return Array.isArray(list)?list.filter(safeId):[];
+  }catch(e){return [];}
+}
+function savePinnedEntities(values){
+  if(!Array.isArray(values))throw Error('Invalid entity list');
+  var list=[];
+  values.forEach(function(value){
+    var id=String(value||'').trim().toLowerCase();
+    if(!safeId(id))throw Error('Invalid entity ID: '+String(value).slice(0,80));
+    if(list.indexOf(id)<0)list.push(id);
+  });
+  if(list.length>MAX_PINNED)throw Error('At most '+MAX_PINNED+' entities can be pinned');
+  localStorage.setItem(PINNED_KEY,JSON.stringify(list));
+  return list;
+}
+// The source is polled every few seconds per subscriber, so pinned entities
+// are read one by one instead of downloading every state each time.
+async function pinnedStates(pinned){
+  var results=await Promise.all(pinned.map(function(id){
+    return api('/api/states/'+encodeURIComponent(id));
+  }));
+  var failed=results.filter(function(r){return !r.ok&&r.status!==404;})[0];
+  if(failed)return failed;
+  return {ok:true,data:results.map(function(r,i){
+    return r.ok&&r.data&&r.data.entity_id===pinned[i]?r.data:
+      {entity_id:pinned[i],state:'unavailable',attributes:{}};
+  })};
+}
 Pebble.registerSourceHandler(async function(request,respond){
   if(request.item==='configured'){
     var present=!!baseUrl()&&!!(await Pebble.secureStorage.getItem(TOKEN_KEY));
@@ -212,7 +250,8 @@ Pebble.registerSourceHandler(async function(request,respond){
         configured:{boolean:{value:present}}}}]});return;
   }
   if(request.item!=='entity'){respond.error('INVALID_REQUEST','Unknown source');return;}
-  var result=await api('/api/states');
+  var pinned=pinnedEntities();
+  var result=pinned.length?await pinnedStates(pinned):await api('/api/states');
   if(!result.ok){respond.error(result.code,result.message);return;}
   if(!Array.isArray(result.data)){respond.error('UNKNOWN','Unexpected states response');return;}
   respond.data({validUntilMs:Date.now()+30000,instances:result.data.slice(0,400).map(function(state){
@@ -807,7 +846,24 @@ Pebble.registerConfigHandler(async function(message,respond){
     case 'status':{
       var hasToken=!!(await Pebble.secureStorage.getItem(TOKEN_KEY));
       respond({url:baseUrl(),hasToken:hasToken,configured:!!baseUrl()&&hasToken,
-        allow_local_http:localHttpEnabled()});return;
+        allow_local_http:localHttpEnabled(),pinned:pinnedEntities()});return;
+    }
+    case 'pins_save':
+      try{
+        var pinned=savePinnedEntities(message.entities);
+        Pebble.refreshSources(['agent/entity']);
+        respond({ok:true,pinned:pinned});
+      }catch(e){respond({ok:false,error:e.message});}
+      return;
+    case 'entity_list':{
+      var states=await api('/api/states');
+      if(!states.ok||!Array.isArray(states.data)){
+        respond({ok:false,error:states.message||'Unexpected states response'});return;
+      }
+      respond({ok:true,entities:states.data.map(function(state){
+        return {id:state.entity_id,
+          name:String(state.attributes&&state.attributes.friendly_name||'').slice(0,120)};
+      })});return;
     }
     case 'save':{
       try{

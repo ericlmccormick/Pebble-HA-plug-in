@@ -68,6 +68,7 @@ const context={Pebble,console,Date,JSON,Number,String,Object,Array,Promise,isFin
       path==='/api/conversation/process'?{conversation_id:'abc',response:{speech:{plain:{speech:'Lights are on.'}}}}:
       path==='/api/tts_get_url'?{path:'/api/tts_proxy/demo.wav'}:
       {entity_id:'light.kitchen',state:'on',attributes:{}};
+    if(path==='/api/states/sensor.removed')return {ok:false,status:404,text:async()=>''};
     if(path==='/api/template'){
       const body=JSON.parse(opt.body);
       const ids=[...body.template.matchAll(/area_name\("([^"]+)"\)/g)].map(m=>m[1]);
@@ -212,6 +213,27 @@ function callSource(item){return new Promise(resolve=>source({item},{data:d=>res
   let data=await callSource('entity');
   assert.strictEqual(data.instances.length,2);
   assert.strictEqual(data.instances[0].properties.value.numericValue.value,21.5);
+  // With pins the source lists only those, in saved order; a missing one keeps its slot.
+  assert.deepStrictEqual(Array.from((await callConfig({type:'status'})).pinned),[]);
+  assert(!(await callConfig({type:'pins_save',entities:['not an id']})).ok);
+  let pins=await callConfig({type:'pins_save',
+    entities:['sensor.removed',' Light.Kitchen ','light.kitchen']});
+  assert(pins.ok);
+  assert.deepStrictEqual(Array.from(pins.pinned),['sensor.removed','light.kitchen']);
+  const beforePinned=calls.length;
+  data=await callSource('entity');
+  assert.deepStrictEqual(calls.slice(beforePinned).map(c=>new URL(c.url).pathname).sort(),
+    ['/api/states/light.kitchen','/api/states/sensor.removed'],
+    'Pinned entities are read individually, not through the full state list');
+  assert.deepStrictEqual(data.instances.map(i=>i.instanceId),
+    ['sensor.removed','light.kitchen']);
+  assert.strictEqual(data.instances[0].properties.state.shortText.text,'unavailable');
+  assert.strictEqual(data.instances[1].properties.on.boolean.value,true);
+  let choices=await callConfig({type:'entity_list'});
+  assert(choices.ok);
+  assert(choices.entities.some(e=>e.id==='sensor.temp'&&e.name==='Temperature'));
+  assert((await callConfig({type:'pins_save',entities:[]})).ok);
+  assert.strictEqual((await callSource('entity')).instances[0].instanceId,'sensor.temp');
   let discovery=await callConfig({type:'voice_discover'});
   assert(discovery.ok);
   assert(discovery.discovery.agents.some(a=>a.id==='conversation.google_ai'));

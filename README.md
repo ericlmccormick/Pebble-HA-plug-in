@@ -51,7 +51,7 @@ Plugin UUID: `a74370b6-929c-4ec0-b7ee-2fc6fca8db57`.
 Sources:
 
 - `agent/configured`: whether a URL and token are configured.
-- `agent/entity`: state, numeric/boolean readings, name, unit, domain and ID from HA states. The source may be bounded; use `get_state` for a specific entity.
+- `agent/entity`: state, numeric/boolean readings, name, unit, domain and ID from HA states. The source may be bounded; use `get_state` for a specific entity. When entities are pinned under **Complication entities** in the plugin settings, the source lists only those, in the saved order, so a watchface complication that selects the 1st, 2nd, … instance keeps pointing at the same entity. A pinned entity missing from Home Assistant keeps its position and reads `unavailable`.
 
 Actions:
 

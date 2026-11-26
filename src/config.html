@@ -5,7 +5,7 @@
 :root{color-scheme:light dark}body{font:16px system-ui,sans-serif;margin:20px;max-width:600px}
 label{display:block;margin:18px 0 6px}input{box-sizing:border-box;width:100%;padding:11px;border-radius:7px;border:1px solid #888;background:transparent;color:inherit}
 button{padding:12px 18px;margin:15px 9px 0 0;border:0;border-radius:8px;background:#1685b8;color:white}
-button.alt{background:#555}select{width:100%;padding:11px;border:1px solid #888;border-radius:7px;background:transparent;color:inherit}fieldset{margin-top:25px;border:1px solid #888;border-radius:10px;padding:14px}legend{font-weight:bold}.toggle{display:flex;align-items:center;gap:10px;margin:14px 0}.toggle input{width:auto;flex:none}.warning{padding:10px;border:1px solid #d97706;border-radius:7px;background:rgba(217,119,6,.09)}.note{font-size:13px;opacity:.8}#status{white-space:pre-wrap;padding:14px;background:rgba(128,128,128,.15);margin-top:16px;border-radius:8px}
+button.alt{background:#555}button.mini{padding:4px 10px;margin:2px 0 2px 6px}#pins{padding-left:22px;word-break:break-all}#pin_choices div{padding:9px 6px;border-bottom:1px solid rgba(128,128,128,.4);word-break:break-all;cursor:pointer}#pin_choices small{display:block;opacity:.7}select{width:100%;padding:11px;border:1px solid #888;border-radius:7px;background:transparent;color:inherit}fieldset{margin-top:25px;border:1px solid #888;border-radius:10px;padding:14px}legend{font-weight:bold}.toggle{display:flex;align-items:center;gap:10px;margin:14px 0}.toggle input{width:auto;flex:none}.warning{padding:10px;border:1px solid #d97706;border-radius:7px;background:rgba(217,119,6,.09)}.note{font-size:13px;opacity:.8}#status{white-space:pre-wrap;padding:14px;background:rgba(128,128,128,.15);margin-top:16px;border-radius:8px}
 </style></head><body>
 <h2>Home Assistant Bridge</h2>
 <p>Configure your Home Assistant server once. Other Pebble apps can request permission to read its entities, send conversation messages, or control services.</p>
@@ -27,6 +27,15 @@ button.alt{background:#555}select{width:100%;padding:11px;border:1px solid #888;
 <button id="discover" class="alt">Refresh available providers</button>
 <button id="savevoice">Save voice &amp; AI defaults</button>
 <p class="note" id="voice_note">Connect to Home Assistant to load provider choices.</p>
+</fieldset>
+<fieldset><legend>Complication entities</legend>
+<p class="note">Watchface complications pick a Home Assistant entity by position (1st, 2nd, …). Once you add entities here, complications offer only these, in this order, so a complication keeps showing the same entity when entities are added or removed in Home Assistant. With an empty list, all entities are offered. Removing or reordering an entry here changes the position of the entries below it.</p>
+<ol id="pins"></ol>
+<label for="pin_input">Entity ID</label>
+<input id="pin_input" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Type an entity ID or name">
+<div id="pin_choices"></div>
+<button id="pin_add" class="alt">Add</button><button id="pin_save">Save complication entities</button>
+<p class="note" id="pin_note"></p>
 </fieldset>
 <p class="note">Use a dedicated Home Assistant user with only the permissions necessary. The generic service action can control sensitive devices when approved by the user.</p>
 <script>
@@ -67,13 +76,67 @@ button.alt{background:#555}select{width:100%;padding:11px;border:1px solid #888;
         'Select your preferred defaults. These do not change Home Assistant pipelines.';
     }catch(e){$('voice_note').textContent='Could not load providers: '+e.message;}
   }
+  var pins=[];
+  function renderPins(){
+    var list=$('pins');list.textContent='';
+    pins.forEach(function(id,i){
+      var li=document.createElement('li');
+      li.appendChild(document.createTextNode(id+' '));
+      function button(text,title,fn){
+        var b=document.createElement('button');b.className='alt mini';b.textContent=text;b.title=title;
+        b.onclick=function(){fn();renderPins();};li.appendChild(b);
+      }
+      if(i>0)button('↑','Move up',function(){pins.splice(i-1,0,pins.splice(i,1)[0]);});
+      if(i<pins.length-1)button('↓','Move down',function(){pins.splice(i+1,0,pins.splice(i,1)[0]);});
+      button('✕','Remove',function(){pins.splice(i,1);});
+      list.appendChild(li);
+    });
+  }
+  var entities=[];
+  function renderChoices(){
+    var list=$('pin_choices'),query=$('pin_input').value.trim().toLowerCase();
+    list.textContent='';
+    if(!query)return;
+    entities.filter(function(e){
+      return pins.indexOf(e.id)<0&&(e.id.indexOf(query)>=0||e.name.toLowerCase().indexOf(query)>=0);
+    }).slice(0,8).forEach(function(e){
+      var row=document.createElement('div');row.textContent=e.id;
+      if(e.name){var name=document.createElement('small');name.textContent=e.name;row.appendChild(name);}
+      row.onclick=function(){$('pin_input').value=e.id;addTypedPin();};
+      list.appendChild(row);
+    });
+  }
+  $('pin_input').addEventListener('input',renderChoices);
+  async function loadEntityChoices(){
+    try{
+      var r=await send({type:'entity_list'});
+      if(!r.ok){$('pin_note').textContent='Suggestions unavailable: '+(r.error||'could not list entities');return;}
+      entities=r.entities;renderChoices();
+    }catch(e){$('pin_note').textContent='Suggestions unavailable: '+e.message;}
+  }
+  function addTypedPin(){
+    var id=$('pin_input').value.trim().toLowerCase();
+    if(!/^[a-z][a-z0-9_]*\.[a-z0-9_]+$/.test(id)){$('pin_note').textContent='Enter an entity ID such as sensor.temperature.';return;}
+    if(pins.indexOf(id)<0)pins.push(id);
+    $('pin_input').value='';$('pin_note').textContent='Not saved yet.';renderPins();renderChoices();
+  }
+  $('pin_add').onclick=addTypedPin;
+  $('pin_save').onclick=async function(){
+    $('pin_note').textContent='Saving…';
+    try{
+      var r=await send({type:'pins_save',entities:pins});
+      if(r.ok){pins=r.pinned;renderPins();}
+      $('pin_note').textContent=r.ok?'Complication entities saved.':(r.error||'Save failed.');
+    }catch(e){$('pin_note').textContent='Save failed: '+e.message;}
+  };
   async function load(){
     try {var r=await send({type:'status'});
+      pins=r.pinned||[];renderPins();
       $('url').value=r.url||'';
       $('localhttp').checked=r.allow_local_http===true;
       updateLocalMode();
       status(r.configured?'Configured (token stored).':'Not configured.');
-      if(r.configured)await discoverVoice();
+      if(r.configured){loadEntityChoices();await discoverVoice();}
     }catch(e){status('Could not read plugin status: '+e.message);}
   }
   $('save').onclick=async function(){
@@ -82,7 +145,7 @@ button.alt{background:#555}select{width:100%;padding:11px;border:1px solid #888;
       allow_local_http:$('localhttp').checked});
       $('token').value='';
       status(r.ok?'Saved. You can test the connection now.':(r.error||'Save failed.'));
-      if(r.ok)await discoverVoice();
+      if(r.ok){loadEntityChoices();await discoverVoice();}
     }catch(e){status('Save failed: '+e.message);}
   };
   $('discover').onclick=discoverVoice;
